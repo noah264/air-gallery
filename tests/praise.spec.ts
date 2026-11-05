@@ -159,11 +159,15 @@ test("camera thumbs-up continuously replenishes random praise, drains on release
 test("praise falls across the screen, keeps controls usable and supports reduced motion", async ({
   page,
 }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/");
   await page.keyboard.press("Enter");
   await expect(page.locator(".viewer-photo")).toBeVisible();
   await page.clock.install();
-  await page.clock.pauseAt(new Date(Date.now() + 100));
+  // Use the browser's clock with room for CI command latency. A 100ms deadline
+  // based on the test runner's wall clock can already be in the past on arrival.
+  const pauseTime = await page.evaluate(() => Date.now() + 60_000);
+  await page.clock.pauseAt(new Date(pauseTime));
   await page.keyboard.press("p");
   await expect(page.getByTestId("praise-rain")).toBeVisible();
   // CSS animations use the browser animation timeline, independent of the JS clock.
