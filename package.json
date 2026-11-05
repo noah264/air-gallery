@@ -1,6 +1,6 @@
 {
   "name": "airgallery",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "A local-first spatial photo album with gesture controls",
   "author": "AirGallery",

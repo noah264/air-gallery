@@ -943,6 +943,29 @@ p {
   z-index: 3;
   pointer-events: none;
 }
+.space-fireworks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.camera-indicator {
+  position: fixed;
+  bottom: 22px;
+  left: 24px;
+  z-index: 16;
+  max-width: min(340px, calc(100vw - 48px));
+  padding: 10px 14px;
+  border-radius: 14px;
+  pointer-events: none;
+  font-size: 11px;
+}
+.camera-indicator small {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  opacity: 0.65;
+}
 
 .praise-rain {
   position: fixed;

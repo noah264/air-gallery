@@ -11,6 +11,7 @@ export interface HandSample {
   pinch: boolean;
   open: boolean;
   pinchRatio?: number;
+  clapPalm?: boolean;
   pose?: "victory" | "fist" | "thumbs-up" | "neutral";
   palm?: { x: number; y: number; size: number };
 }
@@ -31,6 +32,10 @@ export type GestureEvent =
 function distance(a: Point, b: Point) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
+function spatialDistance(a: Point, b: Point) {
+  const depth = (p: Point) => (Number.isFinite(p.z) ? p.z! : 0);
+  return Math.hypot(a.x - b.x, a.y - b.y, depth(a) - depth(b));
+}
 export function sampleHand(points: Point[]): HandSample | null {
   if (
     points.length < 21 ||
@@ -38,6 +43,15 @@ export function sampleHand(points: Point[]): HandSample | null {
   )
     return null;
   const palm = Math.max(distance(points[0], points[9]), 0.005);
+  // Side-facing palms collapse in the image plane during a real clap. Use
+  // depth for this pose only, preserving the navigation and pinch calibration.
+  const clapSize = Math.max(spatialDistance(points[0], points[9]), 0.005);
+  const clapPalm =
+    [8, 12, 16, 20].filter(
+      (tip) =>
+        spatialDistance(points[tip], points[0]) >
+        spatialDistance(points[tip - 2], points[0]) * 1.1,
+    ).length >= 3 && spatialDistance(points[4], points[8]) / clapSize >= 0.5;
   const extended = [8, 12, 16, 20].map(
     (tip) =>
       distance(points[tip], points[0]) >
@@ -90,13 +104,14 @@ export function sampleHand(points: Point[]): HandSample | null {
     pinchRatio: distance(points[4], points[8]) / palm,
     pinch: pose === "neutral" && distance(points[4], points[8]) / palm < 0.35,
     open: extended.filter(Boolean).length >= 3,
+    clapPalm,
     pose,
     palm: {
       x:
         1 -
         [0, 5, 9, 13, 17].reduce((sum, index) => sum + points[index].x, 0) / 5,
       y: [0, 5, 9, 13, 17].reduce((sum, index) => sum + points[index].y, 0) / 5,
-      size: palm,
+      size: clapSize,
     },
   };
 }
@@ -143,6 +158,9 @@ export class GestureInterpreter {
   private scope: GestureScope = "space";
   reset() {
     this.clap.reset();
+    this.resetNavigation();
+  }
+  private resetNavigation() {
     this.tracks = [];
     this.lastTime = -Infinity;
     this.previous = null;
@@ -165,13 +183,19 @@ export class GestureInterpreter {
       this.span = null;
       this.scope = scope;
     }
+    const clapped = this.clap.update(hands, time, true);
     if (!hands.length) {
-      this.reset();
+      // Reset navigation immediately, but preserve a short contact occlusion.
+      this.resetNavigation();
       return [];
     }
-    const clapped = this.clap.update(hands, time, scope === "image");
-    // Two open palms are reserved for clapping in the viewer. They cannot flip a page.
-    if (scope === "image" && hands.length === 2 && hands.every(isClapPalm)) {
+    // Reserve two palms and brief contact occlusion in both views. A clap
+    // cannot also swipe, zoom, or start a fist-to-close hold.
+    if (
+      clapped ||
+      this.clap.pending ||
+      (hands.length === 2 && hands.every(isClapPalm))
+    ) {
       this.previous = null;
       this.span = null;
       this.swipe = null;

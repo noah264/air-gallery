@@ -17,19 +17,46 @@ import {
   SRGBColorSpace,
   Texture,
   TextureLoader,
+  Vector3,
 } from "three";
 import type { Album, AlbumPosition, View } from "../types";
 import { useThumbnail } from "../lib/thumbnails";
+import { hash } from "../lib/space";
 
 const photoPlane = new PlaneGeometry();
+function FloatingFrames({ enabled }: { enabled: boolean }) {
+  const invalidate = useThree((state) => state.invalidate);
+  const timer = useRef(0);
+  useEffect(() => {
+    invalidate();
+    return () => clearTimeout(timer.current);
+  }, [enabled, invalidate]);
+  useFrame(() => {
+    clearTimeout(timer.current);
+    if (!enabled) return;
+    // Schedule after the render returns. Slow/software GPUs get an idle gap
+    // proportional to render cost, leaving time for camera frames and input.
+    const started = performance.now();
+    timer.current = window.setTimeout(() => {
+      const cost = performance.now() - started;
+      timer.current = window.setTimeout(
+        invalidate,
+        Math.max(8, 1000 / 30 - cost, cost * 0.8),
+      );
+    }, 0);
+  });
+  return null;
+}
 function CameraRig({
   view,
   fit,
   label,
+  focus,
 }: {
   view: View;
   fit: number;
   label: RefObject<HTMLButtonElement | null>;
+  focus: RefObject<Vector3>;
 }) {
   const { camera, invalidate, size } = useThree();
   const destination = useRef({ ...view, zoom: Math.exp(view.logZoom) * fit });
@@ -64,8 +91,8 @@ function CameraRig({
     } else invalidate();
     current.updateProjectionMatrix();
     if (label.current) {
-      label.current.style.left = `${size.width / 2 - current.position.x * current.zoom}px`;
-      label.current.style.top = `${size.height / 2 + (current.position.y - 165) * current.zoom - 14}px`;
+      label.current.style.left = `${size.width / 2 + (focus.current.x - current.position.x) * current.zoom}px`;
+      label.current.style.top = `${size.height / 2 + (current.position.y - focus.current.y - 165) * current.zoom - 14}px`;
     }
   });
   return null;
@@ -77,6 +104,9 @@ const PhotoStack = memo(function PhotoStack({
   select,
   open,
   shadow,
+  floating,
+  focus,
+  ready,
 }: {
   shadow: Texture;
   album: Album;
@@ -84,12 +114,22 @@ const PhotoStack = memo(function PhotoStack({
   selected: boolean;
   select: (id: string) => void;
   open: (id: string) => void;
+  floating: boolean;
+  focus: RefObject<Vector3>;
+  ready: (id: string) => void;
 }) {
   const group = useRef<Group>(null);
   const initial = useRef(target).current;
+  const phase = useMemo(
+    () => (hash(album.id) / 4294967296) * Math.PI * 2,
+    [album.id],
+  );
   const thumbnail = useThumbnail(album.photos[0]);
   const [texture, setTexture] = useState<Texture | null>(null);
   const { invalidate } = useThree();
+  useEffect(() => {
+    if (texture && selected) ready(album.id);
+  }, [texture, selected, ready, album.id]);
   useEffect(() => {
     if (!thumbnail) return;
     let active = true;
@@ -105,28 +145,38 @@ const PhotoStack = memo(function PhotoStack({
       loaded.dispose();
     };
   }, [thumbnail, invalidate]);
-  useFrame((_, delta) => {
+  useFrame(({ clock, camera }, delta) => {
     if (!group.current) return;
     const object = group.current;
+    const time = clock.elapsedTime;
+    const amplitude = floating
+      ? (selected ? 7 : 5) / Math.max(1, (camera as OrthographicCamera).zoom)
+      : 0;
+    const x = target.x + Math.sin(time * 0.43 + phase) * amplitude;
+    const y = target.y + Math.sin(time * 0.56 + phase * 1.7) * amplitude;
+    const rotation =
+      target.rotation +
+      (floating
+        ? (Math.sin(time * 0.3 + phase) * 0.006) /
+          Math.max(1, (camera as OrthographicCamera).zoom)
+        : 0);
     const damping = 1 - Math.exp(-12 * Math.min(delta, 0.05));
-    object.position.x = MathUtils.lerp(object.position.x, target.x, damping);
-    object.position.y = MathUtils.lerp(object.position.y, target.y, damping);
+    object.position.x = MathUtils.lerp(object.position.x, x, damping);
+    object.position.y = MathUtils.lerp(object.position.y, y, damping);
     object.position.z = MathUtils.lerp(object.position.z, target.z, damping);
-    object.rotation.z = MathUtils.lerp(
-      object.rotation.z,
-      target.rotation,
-      damping,
-    );
+    object.rotation.z = MathUtils.lerp(object.rotation.z, rotation, damping);
     object.scale.x = MathUtils.lerp(object.scale.x, target.width, damping);
     object.scale.y = MathUtils.lerp(object.scale.y, target.height, damping);
+    if (selected) focus.current.copy(object.position);
     if (
-      Math.abs(object.position.x - target.x) +
-        Math.abs(object.position.y - target.y) +
+      Math.abs(object.position.x - x) +
+        Math.abs(object.position.y - y) +
         Math.abs(object.scale.x - target.width) +
         Math.abs(object.scale.y - target.height) +
         Math.abs(object.position.z - target.z) +
-        Math.abs(object.rotation.z - target.rotation) >
-      0.05
+        Math.abs(object.rotation.z - rotation) >
+        0.05 &&
+      !floating
     )
       invalidate();
   });
@@ -223,6 +273,9 @@ function VisibleStacks({
   select,
   open,
   shadow,
+  floating,
+  focus,
+  ready,
 }: {
   albums: Album[];
   positions: AlbumPosition[];
@@ -232,6 +285,9 @@ function VisibleStacks({
   select: (id: string) => void;
   open: (id: string) => void;
   shadow: Texture;
+  floating: boolean;
+  focus: RefObject<Vector3>;
+  ready: (id: string) => void;
 }) {
   const size = useThree((state) => state.size);
   const zoom = Math.exp(view.logZoom) * fit;
@@ -254,6 +310,9 @@ function VisibleStacks({
         selected={album.id === selected}
         select={select}
         open={open}
+        floating={floating}
+        focus={focus}
+        ready={ready}
       />
     );
   });
@@ -280,6 +339,24 @@ export default memo(function SpatialGallery({
   select: (id: string) => void;
   open: (id: string) => void;
 }) {
+  const focus = useRef(new Vector3());
+  const [readyId, setReadyId] = useState<string | null>(null);
+  const [reduced, setReduced] = useState(
+    () => matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+  const [visible, setVisible] = useState(() => !document.hidden);
+  useEffect(() => {
+    const preference = matchMedia("(prefers-reduced-motion: reduce)");
+    const change = () => setReduced(preference.matches);
+    const visibility = () => setVisible(!document.hidden);
+    preference.addEventListener("change", change);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      preference.removeEventListener("change", change);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
+  const floating = !paused && visible && !reduced && readyId === selected;
   const shadow = useMemo(() => {
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 64;
@@ -296,7 +373,8 @@ export default memo(function SpatialGallery({
     <Canvas
       orthographic
       camera={{ position: [0, 0, 1400], near: 0.1, far: 3000 }}
-      frameloop={paused ? "never" : "demand"}
+      frameloop={paused || !visible ? "never" : "demand"}
+      data-floating={floating}
       dpr={[1, 1.5]}
       gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
       fallback={
@@ -305,7 +383,7 @@ export default memo(function SpatialGallery({
         </div>
       }
     >
-      <CameraRig view={view} fit={fit} label={label} />
+      <FloatingFrames enabled={floating} />
       <VisibleStacks
         albums={albums}
         positions={positions}
@@ -315,7 +393,11 @@ export default memo(function SpatialGallery({
         select={select}
         open={open}
         shadow={shadow}
+        floating={floating}
+        focus={focus}
+        ready={setReadyId}
       />
+      <CameraRig view={view} fit={fit} label={label} focus={focus} />
     </Canvas>
   );
 });

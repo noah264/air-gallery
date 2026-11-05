@@ -13,6 +13,7 @@ import { Settings } from "./components/Settings";
 import { ImageViewer } from "./components/ImageViewer";
 import { PraiseRain } from "./components/PraiseRain";
 import { GestureProgress } from "./components/GestureProgress";
+import { Fireworks } from "./components/Fireworks";
 import { unlockFireworksAudio } from "./lib/fireworks";
 import { useLibrary } from "./lib/library";
 import { initialView, createLayout, zoomAt, zoomImageAt } from "./lib/space";
@@ -42,9 +43,11 @@ export default function App() {
     null,
   );
   const praiseSequence = useRef(0);
+  const celebrationSequence = useRef(0);
   const [celebration, setCelebration] = useState<{
     photo: string;
     sequence: number;
+    scope: "space" | "image";
   } | null>(null);
   const [fireworksSound, setFireworksSound] = useState(() => {
     try {
@@ -91,12 +94,19 @@ export default function App() {
   const currentAlbum = library.albums.find((album) => album.id === selected);
   const openedAlbum = library.albums.find((album) => album.id === viewer);
   const celebrate = () => {
-    const photo = openedAlbum?.photos[page],
+    const photo = openedAlbum?.photos[page] ?? currentAlbum?.photos[0],
       now = performance.now();
     if (!photo || settings || now - lastCelebration.current < 800) return;
     lastCelebration.current = now;
-    setCelebration({ photo: photo.id, sequence: now });
+    setCelebration({
+      photo: photo.id,
+      sequence: ++celebrationSequence.current,
+      scope: openedAlbum ? "image" : "space",
+    });
   };
+  useEffect(() => {
+    setCelebration(null);
+  }, [selected, viewer, page, settings, spaceKey]);
   const praiseShower = () => {
     if (settings || document.hidden) return;
     const sequence = ++praiseSequence.current;
@@ -206,6 +216,9 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [message]);
   useEffect(() => {
+    if (/失败|被拒绝|不可用/.test(camera.status)) setMessage(camera.status);
+  }, [camera.status]);
+  useEffect(() => {
     if (!library.albums.some((album) => album.id === selected))
       setSelected(library.albums[0]?.id || null);
     if (viewer && !openedAlbum) setViewer(null);
@@ -213,6 +226,7 @@ export default function App() {
       setPage(Math.max(0, openedAlbum.photos.length - 1));
   }, [library.albums, selected, viewer, openedAlbum, page]);
   const select = useCallback((id: string) => {
+    setCelebration(null);
     setSelected(id);
     setView((value) => ({ ...value, x: 0, y: 0 }));
   }, []);
@@ -301,7 +315,7 @@ export default function App() {
       setSettings(true);
     }
     if (event.key.toLowerCase() === "h") camera.toggle();
-    if (event.key.toLowerCase() === "f" && !event.repeat && viewer) {
+    if (event.key.toLowerCase() === "f" && !event.repeat) {
       event.preventDefault();
       celebrate();
     }
@@ -351,7 +365,7 @@ export default function App() {
       }));
   };
   gestureCallback.current = (event) => {
-    if (event.type === "clap" && viewer) celebrate();
+    if (event.type === "clap") celebrate();
     if (event.type === "activate") {
       if (event.action === "open" && !viewer && currentAlbum)
         open(currentAlbum.id);
@@ -457,7 +471,9 @@ export default function App() {
           >
             <SpatialGallery
               label={label}
-              paused={!!openedAlbum}
+              paused={
+                !!openedAlbum || settings || celebration?.scope === "space"
+              }
               albums={library.albums}
               positions={positions}
               selected={selected}
@@ -504,7 +520,8 @@ export default function App() {
             step={step}
             reset={reset}
             celebration={
-              celebration?.photo === openedAlbum.photos[page]?.id
+              celebration?.scope === "image" &&
+              celebration.photo === openedAlbum.photos[page]?.id
                 ? celebration?.sequence || 0
                 : 0
             }
@@ -512,6 +529,18 @@ export default function App() {
             sound={fireworksSound}
             toggleSound={toggleFireworksSound}
           />
+        ) : null}
+        {!viewer &&
+        !settings &&
+        celebration?.scope === "space" &&
+        celebration.photo === currentAlbum?.photos[0]?.id ? (
+          <div className="space-fireworks" data-testid="space-fireworks">
+            <Fireworks
+              key={celebration.sequence}
+              sound={fireworksSound}
+              done={() => setCelebration(null)}
+            />
+          </div>
         ) : null}
       </div>
       {praise !== null && !settings ? (
@@ -534,6 +563,12 @@ export default function App() {
       </div>
       {!settings && camera.enabled && (viewer || currentAlbum) ? (
         <GestureProgress feedback={camera.feedback} />
+      ) : null}
+      {!settings && camera.enabled ? (
+        <div className="camera-indicator glass-panel" role="status">
+          <span>{camera.status}</span>
+          <small>双掌先分开入镜，再快速拍手 · H 暂停</small>
+        </div>
       ) : null}
       {settings ? (
         <Settings
