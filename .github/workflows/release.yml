@@ -1,0 +1,135 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to release
+        required: true
+        default: v0.1.7
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Check version matches tag
+        run: node -e 'if (process.env.RELEASE_TAG !== "v" + JSON.parse(require("fs").readFileSync("package.json")).version) throw new Error("Tag and package version differ")'
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Archive Web distribution
+        run: cd dist && zip -r "../AirGallery-${RELEASE_TAG#v}-web.zip" .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-web
+          path: AirGallery-*-web.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  desktop:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+            arch: arm64
+          - os: macos-latest
+            platform: mac
+            arch: x64
+          - os: windows-latest
+            platform: win
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run desktop:dist -- --${{ matrix.platform }} --${{ matrix.arch }} --publish never
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            release/*.dmg
+            release/*.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: [validate, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: packages
+          merge-multiple: true
+      - name: Generate checksums
+        run: cd packages && sha256sum *.dmg *.exe *.zip > SHA256SUMS.txt
+      - name: Publish complete release
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const tag = process.env.RELEASE_TAG;
+            const repo = context.repo;
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({...repo, tag})).data;
+              if (!release.draft) throw new Error('Release is already published; use a new version tag.');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              release = (await github.rest.repos.createRelease({
+                ...repo, tag_name: tag, name: `AirGallery ${tag}`, draft: true,
+                body: fs.readFileSync(`docs/releases/${tag}.md`, 'utf8')
+              })).data;
+            }
+            const existing = await github.paginate(github.rest.repos.listReleaseAssets, {...repo, release_id: release.id});
+            for (const name of fs.readdirSync('packages')) {
+              const old = existing.find(asset => asset.name === name);
+              if (old) await github.rest.repos.deleteReleaseAsset({...repo, asset_id: old.id});
+              await github.rest.repos.uploadReleaseAsset({
+                ...repo, release_id: release.id, name,
+                data: fs.readFileSync(path.join('packages', name))
+              });
+            }
+            await github.rest.repos.updateRelease({...repo, release_id: release.id, draft: false});

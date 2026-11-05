@@ -1,0 +1,80 @@
+{
+  "name": "airgallery",
+  "version": "0.1.7",
+  "private": true,
+  "description": "A local-first spatial photo album with gesture controls",
+  "author": "AirGallery",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "postinstall": "node scripts/prepare-assets.mjs",
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run src",
+    "test:e2e": "playwright test",
+    "test:desktop": "node tests/desktop.smoke.mjs",
+    "format": "prettier --write src electron scripts tests *.ts *.json index.html",
+    "assets:prepare": "node scripts/prepare-assets.mjs",
+    "desktop:dev": "node scripts/desktop-dev.mjs",
+    "desktop:start": "electron .",
+    "desktop:pack": "npm run build && electron-builder --dir",
+    "desktop:dist": "npm run build && electron-builder"
+  },
+  "build": {
+    "appId": "studio.airgallery.desktop",
+    "productName": "AirGallery",
+    "artifactName": "AirGallery-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.photography",
+      "target": [
+        "dmg"
+      ],
+      "extendInfo": {
+        "NSCameraUsageDescription": "使用摄像头在本机识别手势，控制空间画册。"
+      }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.2.2",
+    "@react-three/fiber": "^9.8.2",
+    "idb": "^8.0.4",
+    "lucide-react": "^1.68.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.187.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^45.2.2",
+    "electron-builder": "^26.18.0",
+    "prettier": "^3.9.10",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.7",
+    "vitest": "^5.1.0"
+  }
+}

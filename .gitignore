@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+test-results/
+.DS_Store
+*.tsbuildinfo
+.env.local
+.env
+.env.*.local
+.idea/
+playwright-report/
+public/mediapipe/
