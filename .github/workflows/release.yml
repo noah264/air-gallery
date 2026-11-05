@@ -37,6 +37,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: npx playwright install --with-deps chrome
+      - run: npm run test:e2e
       - name: Archive Web distribution
         run: cd dist && zip -r "../AirGallery-${RELEASE_TAG#v}-web.zip" .
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

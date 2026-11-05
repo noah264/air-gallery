@@ -147,37 +147,37 @@ test("camera clap triggers one celebration for the current photo without flippin
 test("dense layered blooms fill the photo and respect reduced motion", async ({
   page,
 }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/");
   await page.keyboard.press("Enter");
   await expect(page.locator(".viewer-photo")).toBeVisible();
-  await page.clock.install();
-  await page.clock.pauseAt(new Date(Date.now() + 100));
-  await page.keyboard.press("f");
-  await expect(page.getByTestId("photo-fireworks")).toBeVisible();
-  await page.clock.fastForward(2300);
-  // Freeze animation time so a software-rendered screenshot cannot miss the burst.
-  const coverage = await page
-    .getByTestId("photo-fireworks")
-    .evaluate((element) => {
-      const canvas = element as HTMLCanvasElement;
-      const pixels = canvas
-        .getContext("2d")!
-        .getImageData(0, 0, canvas.width, canvas.height).data;
-      let bright = 0;
-      for (let i = 0; i < pixels.length; i += 4) {
-        if (pixels[i] > 100 && pixels[i + 3] > 80) bright++;
-      }
-      return bright / (canvas.width * canvas.height);
-    });
-  expect(coverage).toBeGreaterThan(0.025);
+  await page.getByRole("button", { name: "放烟花（F）", exact: true }).click();
+  const fireworks = page.getByTestId("photo-fireworks");
+  await expect(fireworks).toBeVisible();
+  // Observe real rendered frames: virtual-clock jumps can skip animation frames
+  // or race React effects and ResizeObserver delivery on software-rendered CI.
+  await expect
+    .poll(
+      () =>
+        fireworks.evaluate((element) => {
+          const canvas = element as HTMLCanvasElement;
+          if (!canvas.width || !canvas.height) return 0;
+          const pixels = canvas
+            .getContext("2d")!
+            .getImageData(0, 0, canvas.width, canvas.height).data;
+          let bright = 0;
+          for (let i = 0; i < pixels.length; i += 4) {
+            if (pixels[i] > 100 && pixels[i + 3] > 80) bright++;
+          }
+          return bright / (canvas.width * canvas.height);
+        }),
+      { timeout: 6000, intervals: [100, 200, 400] },
+    )
+    .toBeGreaterThan(0.025);
   await page.screenshot({ path: "test-results/fireworks-anime-preview.png" });
-  await page.clock.fastForward(2800);
-  await page.screenshot({ path: "test-results/fireworks-finale-preview.png" });
-  await page.clock.fastForward(2500);
-  await expect(page.getByTestId("photo-fireworks")).toHaveCount(0);
+  await expect(fireworks).toHaveCount(0, { timeout: 9500 });
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.keyboard.press("f");
-  await expect(page.getByTestId("photo-fireworks")).toBeVisible();
-  await page.clock.fastForward(7600);
-  await expect(page.getByTestId("photo-fireworks")).toHaveCount(0);
+  await page.getByRole("button", { name: "放烟花（F）", exact: true }).click();
+  await expect(fireworks).toBeVisible();
+  await expect(fireworks).toHaveCount(0, { timeout: 9500 });
 });

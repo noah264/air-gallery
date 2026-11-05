@@ -9,6 +9,7 @@
 - `main` 推送运行核心测试、生产构建与完整浏览器回归，通过后自动部署 GitHub Pages。
 - `v*` 标签触发 macOS arm64 / x64 DMG、Windows x64 NSIS 安装包与 Web 压缩包构建；全部成功后统一发布 GitHub Release，并附 SHA-256 校验值。
 - 桌面版本尚未配置签名、公证或自动更新；Windows CI 构建成功也不代表已完成 Windows 实机体验验证。
+- v0.1.7 的 macOS arm64 / x64 和 Windows x64 均已在对应系统的 GitHub Actions 中打包成功；安装包、Web 静态压缩包与 SHA-256 校验文件已发布至 [GitHub Release](https://github.com/noah264/jetson-photo-wall/releases/tag/v0.1.7)。
 - [v0.1.7 发布说明](./releases/v0.1.7.md)。
 
 ## 已实现
